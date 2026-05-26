@@ -9,6 +9,7 @@ public protocol DrawingEngineProtocol: AnyObject {
     
     func beginStroke(at point: CGPoint, style: StrokeStyle)
     func appendPoint(_ point: CGPoint)
+    func updateActiveStrokeWithStraightLine(to point: CGPoint)
     func endStroke()
     func undo()
     func clear()
@@ -32,6 +33,15 @@ public final class DrawingEngine: ObservableObject, DrawingEngineProtocol {
         let newPoint = StrokePoint(x: point.x, y: point.y)
         current.points.append(newPoint)
         activeStroke = current
+    }
+    
+    public func updateActiveStrokeWithStraightLine(to point: CGPoint) {
+        guard var current = activeStroke else { return }
+        if let firstPoint = current.points.first {
+            let newPoint = StrokePoint(x: point.x, y: point.y)
+            current.points = [firstPoint, newPoint]
+            activeStroke = current
+        }
     }
     
     public func endStroke() {

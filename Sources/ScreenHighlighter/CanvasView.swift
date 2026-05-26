@@ -41,7 +41,11 @@ public final class CanvasView: NSView {
     
     public override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        engine.appendPoint(point)
+        if event.modifierFlags.contains(.shift) {
+            engine.updateActiveStrokeWithStraightLine(to: point)
+        } else {
+            engine.appendPoint(point)
+        }
     }
     
     public override func mouseUp(with event: NSEvent) {
