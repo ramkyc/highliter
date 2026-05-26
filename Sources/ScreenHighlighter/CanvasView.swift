@@ -35,7 +35,7 @@ public final class CanvasView: NSView {
     
     public override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        let style = StrokeStyle(width: strokeWidth, opacity: 0.35, colorHex: "#FFFF00")
+        let style = StrokeStyle(width: strokeWidth, opacity: 0.35, colorHex: engine.activeColorHex)
         engine.beginStroke(at: point, style: style)
     }
     

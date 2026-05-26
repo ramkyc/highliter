@@ -6,6 +6,15 @@ public struct ToolbarView: View {
     
     @State private var isHovered: [String: Bool] = [:]
     
+    // Premium glowing colors mapping hex to SwiftUI Colors
+    private static let paletteColors: [(String, Color)] = [
+        ("#FFFF00", Color.yellow),
+        ("#30D158", Color.green),
+        ("#0A84FF", Color.blue),
+        ("#FF2D55", Color.pink),
+        ("#FF9F0A", Color.orange)
+    ]
+    
     public init(engine: DrawingEngine, onExit: @escaping () -> Void) {
         self.engine = engine
         self.onExit = onExit
@@ -13,21 +22,32 @@ public struct ToolbarView: View {
     
     public var body: some View {
         HStack(spacing: 14) {
-            // Highlighter status tag
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(Color.yellow)
-                    .frame(width: 8, height: 8)
-                    .shadow(color: .yellow.opacity(0.8), radius: 3)
-                
-                Text("Highlighter")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.9))
+            // Interactive Glowing Color Palette
+            HStack(spacing: 8) {
+                ForEach(Self.paletteColors, id: \.0) { hex, color in
+                    Circle()
+                        .fill(color)
+                        .frame(width: 14, height: 14)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white, lineWidth: engine.activeColorHex.uppercased() == hex.uppercased() ? 1.5 : 0)
+                                .frame(width: 20, height: 20)
+                                .shadow(color: color.opacity(0.8), radius: engine.activeColorHex.uppercased() == hex.uppercased() ? 4 : 0)
+                        )
+                        .scaleEffect(isHovered[hex, default: false] ? 1.2 : 1.0)
+                        .animation(.spring(response: 0.2, dampingFraction: 0.5), value: isHovered[hex, default: false])
+                        .onTapGesture {
+                            engine.activeColorHex = hex
+                        }
+                        .onHover { hovering in
+                            isHovered[hex] = hovering
+                        }
+                }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.white.opacity(0.1))
-            .cornerRadius(6)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.white.opacity(0.08))
+            .cornerRadius(8)
             
             Divider()
                 .frame(width: 1, height: 16)

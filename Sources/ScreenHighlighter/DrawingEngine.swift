@@ -18,6 +18,7 @@ public protocol DrawingEngineProtocol: AnyObject {
 public final class DrawingEngine: ObservableObject, DrawingEngineProtocol {
     @Published public private(set) var strokes: [Stroke] = []
     @Published public private(set) var activeStroke: Stroke?
+    @Published public var activeColorHex: String = "#FFFF00"
     
     public init() {}
     

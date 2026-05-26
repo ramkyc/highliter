@@ -29,12 +29,29 @@ public struct StrokeStyle: Codable, Equatable {
     }
     
     public var nsColor: NSColor {
-        // Return active yellow highlight color with defined opacity
-        if colorHex.uppercased() == "#FFFF00" {
-            return NSColor.yellow.withAlphaComponent(opacity)
+        // Dynamically resolve custom hex marker color with defined alpha component
+        return NSColor(hex: colorHex)?.withAlphaComponent(opacity) ?? NSColor.yellow.withAlphaComponent(opacity)
+    }
+}
+
+// MARK: - NSColor Hex Extension
+extension NSColor {
+    convenience init?(hex: String) {
+        var cleanHex = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if cleanHex.hasPrefix("#") {
+            cleanHex.remove(at: cleanHex.startIndex)
         }
-        // Fallback parser for arbitrary hex if needed
-        return NSColor.yellow.withAlphaComponent(opacity)
+        
+        guard cleanHex.count == 6 else { return nil }
+        
+        var rgb: UInt64 = 0
+        guard Scanner(string: cleanHex).scanHexInt64(&rgb) else { return nil }
+        
+        let r = CGFloat((rgb & 0xFF0000) >> 16) / 255.0
+        let g = CGFloat((rgb & 0x00FF00) >> 8) / 255.0
+        let b = CGFloat(rgb & 0x0000FF) / 255.0
+        
+        self.init(red: r, green: g, blue: b, alpha: 1.0)
     }
 }
 
