@@ -9,7 +9,8 @@ It is intentionally designed as a **screenshot-first, ephemeral drawing overlay*
 ## ✨ Features
 
 - **Instant Toggle (`Cmd + Shift + H`)**: A global Carbon background hotkey immediately toggles the drawing canvas overlay from any application.
-- **Organic Marker Strokes**: Renders beautiful, soft, 35%-opaque translucent yellow highlights using Core Graphics path-smoothing (quadratic Bezier interpolation).
+- **Organic Marker Strokes**: Renders beautiful, soft, 35%-opaque translucent highlights using Core Graphics path-smoothing (quadratic Bezier interpolation).
+- **Straight-Line Mode (Shift Key)**: Hold down the `Shift` key while clicking and dragging to lock your highlights to a perfectly straight line, ideal for cleanly underlining or highlighting lines of text.
 - **Premium Glassmorphic HUD**: A floating controls panel (using native macOS HUD vibrancy and frosted glass effects) providing smooth hover micro-animations and quick access to **Undo**, **Clear**, and **Close**.
 - **Display-Aware Canvas**: Intelligently identifies which screen your cursor is active on and displays the full-screen transparent canvas on that specific monitor.
 - **Spaces & Full-Screen Support**: Inherits virtual desktop spaces collection behaviors so it runs seamlessly over games, presentations, and full-screen software.
