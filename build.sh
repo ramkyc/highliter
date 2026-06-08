@@ -32,6 +32,20 @@ cp "Resources/Info.plist" "${APP_BUNDLE}/Contents/Info.plist"
 # Set executable permissions
 chmod +x "${MACOS_DIR}/${APP_NAME}"
 
+echo "=== Signing Application Bundle ==="
+if security find-certificate -c "LocalDeveloper" >/dev/null 2>&1; then
+    codesign --force --deep --sign "LocalDeveloper" "${APP_BUNDLE}"
+    echo "Successfully signed with 'LocalDeveloper' certificate."
+else
+    echo "Warning: 'LocalDeveloper' certificate not found in Keychain. Falling back to ad-hoc signing."
+    codesign --force --deep --sign - "${APP_BUNDLE}"
+fi
+
 echo "=== Successfully built: ${APP_BUNDLE} ==="
+
+echo "=== Installing to /Applications ==="
+cp -R "${APP_BUNDLE}" /Applications/
+echo "Successfully installed ScreenHighlighter to /Applications!"
+
 echo "To run the app, you can launch it using:"
-echo "open ${APP_BUNDLE}"
+echo "open /Applications/${APP_NAME}.app"

@@ -15,7 +15,10 @@ public final class OverlayWindow: NSWindow {
         self.backgroundColor = .clear
         self.isOpaque = false
         self.hasShadow = false
-        self.ignoresMouseEvents = false // Allow click and drag drawing
+        // Initial state: capture clicks for drawing. OverlayWindowController
+        // toggles this at runtime to enter click-through "view" mode, which
+        // keeps highlights visible while letting clicks reach apps below.
+        self.ignoresMouseEvents = false
         
         // Ensure the window displays on all virtual desktops (Spaces) and full-screen games/apps
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]

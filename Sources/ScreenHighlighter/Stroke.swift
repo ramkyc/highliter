@@ -60,11 +60,20 @@ public struct Stroke: Identifiable, Codable, Equatable {
     public var points: [StrokePoint]
     public var style: StrokeStyle
     public let createdAt: Date
-    
-    public init(id: UUID = UUID(), points: [StrokePoint] = [], style: StrokeStyle = StrokeStyle(), createdAt: Date = Date()) {
+
+    /// When present, marks this stroke as a set of independent straight-line
+    /// "bands" (e.g. a multi-line text-style highlight) rather than one
+    /// continuous smoothed path. Each range indexes a `[start, end]` pair in
+    /// `points` that should be drawn as its own segment, with no connecting
+    /// line drawn between bands. `nil` preserves the normal freehand/curve
+    /// rendering used for ordinary strokes.
+    public var bandRanges: [Range<Int>]? = nil
+
+    public init(id: UUID = UUID(), points: [StrokePoint] = [], style: StrokeStyle = StrokeStyle(), createdAt: Date = Date(), bandRanges: [Range<Int>]? = nil) {
         self.id = id
         self.points = points
         self.style = style
         self.createdAt = createdAt
+        self.bandRanges = bandRanges
     }
 }

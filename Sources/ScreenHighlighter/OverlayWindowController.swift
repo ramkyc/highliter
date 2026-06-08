@@ -1,22 +1,27 @@
 import Cocoa
 import SwiftUI
+import Combine
 
 public final class OverlayWindowController: NSWindowController {
     private let engine: DrawingEngine
     private let onDismiss: () -> Void
-    
+
     private var canvasView: CanvasView?
     private var toolbarHostingView: NSHostingView<ToolbarView>?
     private var draggableContainer: DraggableContainerView?
-    
+
+    private var modeCancellable: AnyCancellable?
+    private var interactivityTimer: Timer?
+
     public init(screen: NSScreen, engine: DrawingEngine, onDismiss: @escaping () -> Void) {
         self.engine = engine
         self.onDismiss = onDismiss
-        
+
         let window = OverlayWindow(contentRect: screen.frame)
         super.init(window: window)
-        
+
         setupViews(frame: screen.frame)
+        observeDrawMode()
     }
     
     required init?(coder: NSCoder) {
@@ -73,14 +78,78 @@ public final class OverlayWindowController: NSWindowController {
     }
     
     public func show() {
+        // Always re-enter in drawing mode so the highlighter is active by
+        // default, matching the "active immediately on invocation" requirement.
+        engine.isDrawModeActive = true
+
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
+        refreshInteractivity()
+        startInteractivityMonitoring()
     }
-    
+
     public func hide() {
+        stopInteractivityMonitoring()
         window?.orderOut(nil)
     }
-    
+
+    // MARK: - Click-through / View Mode
+
+    /// Mirrors `engine.isDrawModeActive` so the overlay window's
+    /// `ignoresMouseEvents` stays in sync whenever the toolbar toggles modes.
+    private func observeDrawMode() {
+        modeCancellable = engine.$isDrawModeActive
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refreshInteractivity()
+            }
+    }
+
+    /// Polls the cursor position while the overlay is visible so that, in
+    /// click-through (view) mode, the toolbar remains clickable even though
+    /// the rest of the window passes clicks straight through to apps below.
+    /// `NSWindow.ignoresMouseEvents` is an all-or-nothing window property, so
+    /// this is the simplest reliable way to keep one small region interactive.
+    private func startInteractivityMonitoring() {
+        stopInteractivityMonitoring()
+        interactivityTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.refreshInteractivity()
+            }
+        }
+    }
+
+    private func stopInteractivityMonitoring() {
+        interactivityTimer?.invalidate()
+        interactivityTimer = nil
+    }
+
+    private func refreshInteractivity() {
+        guard let window = self.window as? OverlayWindow else { return }
+
+        if engine.isDrawModeActive {
+            // Drawing mode: capture all clicks across the screen so the user
+            // can paint highlights anywhere.
+            window.ignoresMouseEvents = false
+            return
+        }
+
+        // Click-through (view) mode: highlights stay visible, but clicks pass
+        // straight through to the app underneath everywhere except directly
+        // over the floating toolbar, so the user can still reach its buttons
+        // (e.g. to switch back to drawing mode or exit).
+        guard let container = draggableContainer, let contentView = window.contentView else {
+            window.ignoresMouseEvents = true
+            return
+        }
+
+        let frameInWindow = contentView.convert(container.frame, to: nil)
+        let frameOnScreen = window.convertToScreen(frameInWindow)
+        let mouseLocation = NSEvent.mouseLocation
+
+        window.ignoresMouseEvents = !frameOnScreen.contains(mouseLocation)
+    }
+
     // MARK: - Keyboard Controls
     
     public override func keyDown(with event: NSEvent) {

@@ -52,7 +52,29 @@ public struct ToolbarView: View {
             Divider()
                 .frame(width: 1, height: 16)
                 .background(Color.white.opacity(0.2))
-            
+
+            // Draw / Click-through Mode Toggle
+            Button(action: {
+                engine.isDrawModeActive.toggle()
+            }) {
+                Image(systemName: engine.isDrawModeActive ? "highlighter" : "cursorarrow")
+                    .font(.system(size: 18))
+                    .foregroundColor(engine.isDrawModeActive ? Color.yellow : Color.white.opacity(0.85))
+            }
+            .buttonStyle(.plain)
+            .help(engine.isDrawModeActive
+                ? "Drawing mode — clicks are captured for highlighting. Click to switch to click-through mode so highlights stay visible while you use other apps"
+                : "Click-through mode — highlights stay visible and clicks pass through to apps below. Click to resume drawing")
+            .scaleEffect(isHovered["mode", default: false] ? 1.15 : 1.0)
+            .animation(.spring(response: 0.2, dampingFraction: 0.5), value: isHovered["mode", default: false])
+            .onHover { hovering in
+                isHovered["mode"] = hovering
+            }
+
+            Divider()
+                .frame(width: 1, height: 16)
+                .background(Color.white.opacity(0.2))
+
             // Undo Button
             Button(action: {
                 engine.undo()

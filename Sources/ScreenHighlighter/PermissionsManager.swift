@@ -4,9 +4,14 @@ import ApplicationServices
 @MainActor
 public final class PermissionsManager {
     public static let shared = PermissionsManager()
-    
+
+    /// Tracks whether we've already surfaced the system Screen Recording
+    /// prompt this session, so an OCR-eligible gesture performed repeatedly
+    /// before the user responds doesn't re-trigger the dialog.
+    private var hasRequestedScreenRecording = false
+
     public init() {}
-    
+
     /// Checks if accessibility permission is granted, without prompting the user.
     public func hasAccessibilityPermission() -> Bool {
         return AXIsProcessTrusted()
@@ -42,6 +47,28 @@ public final class PermissionsManager {
         return withExtendedLifetime(options) {
             return AXIsProcessTrustedWithOptions(options)
         }
+    }
+
+    // MARK: - Screen Recording (required for OCR-based line detection)
+
+    /// Checks if Screen Recording permission is granted, without prompting.
+    /// This TCC permission is required to capture display pixels for the
+    /// on-device OCR pass that snaps multi-line highlights onto real text
+    /// lines; it is unrelated to (and separate from) Accessibility access.
+    public func hasScreenRecordingPermission() -> Bool {
+        return CGPreflightScreenCaptureAccess()
+    }
+
+    /// Requests Screen Recording permission, surfacing the native system
+    /// prompt the first time it's called in a session. Subsequent calls while
+    /// the decision is still pending return the current status without
+    /// re-prompting, so a user who hasn't responded yet isn't nagged on every
+    /// Shift+drag gesture.
+    @discardableResult
+    public func requestScreenRecordingPermission() -> Bool {
+        guard !hasRequestedScreenRecording else { return hasScreenRecordingPermission() }
+        hasRequestedScreenRecording = true
+        return CGRequestScreenCaptureAccess()
     }
 }
 
