@@ -5,7 +5,38 @@ public struct ToolbarView: View {
     var onExit: () -> Void
     
     @State private var isHovered: [String: Bool] = [:]
-    
+
+    // MARK: - Column button helpers
+
+    /// The column button cycles through three states:
+    ///   idle     – no column set, not defining
+    ///   defining – user clicked the button, next drag will set the column
+    ///   set      – a column is stored; clicking clears it
+    private enum ColumnButtonState {
+        case idle, defining, set
+    }
+    private var columnButtonState: ColumnButtonState {
+        if engine.columnBounds != nil { return .set }
+        if engine.isColumnDefineMode  { return .defining }
+        return .idle
+    }
+    // Bright saturated cyan — visible against the dark .hudWindow vibrancy material.
+    private static let columnActiveColor = Color(red: 0.25, green: 0.95, blue: 0.90)
+
+    private var columnButtonForeground: Color {
+        columnButtonState == .idle ? Color.white.opacity(0.85) : Self.columnActiveColor
+    }
+    private var columnButtonBackground: Color {
+        columnButtonState == .idle ? Color.clear : Self.columnActiveColor.opacity(0.20)
+    }
+    private var columnButtonHelp: String {
+        switch columnButtonState {
+        case .idle:      return "Set column — drag horizontally to define column bounds for multi-line highlights"
+        case .defining:  return "Drag across the column you want to constrain highlights to. Click again to cancel"
+        case .set:       return "Column set — multi-line highlights are clamped to this column. Click to clear"
+        }
+    }
+
     // Premium glowing colors mapping hex to SwiftUI Colors
     private static let paletteColors: [(String, Color)] = [
         ("#FFFF00", Color.yellow),
@@ -49,6 +80,49 @@ public struct ToolbarView: View {
             .background(Color.white.opacity(0.08))
             .cornerRadius(8)
             
+            Divider()
+                .frame(width: 1, height: 16)
+                .background(Color.white.opacity(0.2))
+
+            // Column Mode Button
+            // Idle: plain icon. Defining: teal icon + label. Set: teal icon + ×.
+            Button(action: {
+                switch columnButtonState {
+                case .idle:
+                    engine.isColumnDefineMode = true
+                case .defining:
+                    // Cancel — exit define mode without committing any bounds.
+                    engine.isColumnDefineMode = false
+                case .set:
+                    engine.clearColumnBounds()
+                }
+            }) {
+                // No text label in any state — keeps the toolbar width stable
+                // regardless of mode, so the X button is never pushed outside
+                // the container's hittable frame. State is communicated via
+                // icon fill (set) and background + colour (defining / set).
+                HStack(spacing: 3) {
+                    Image(systemName: columnButtonState == .set
+                          ? "rectangle.split.3x1.fill"
+                          : "rectangle.split.3x1")
+                        .font(.system(size: 14))
+                    if columnButtonState == .set {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                }
+                .foregroundColor(columnButtonForeground)
+                .padding(.horizontal, columnButtonState == .idle ? 0 : 5)
+                .padding(.vertical,   columnButtonState == .idle ? 0 : 2)
+                .background(columnButtonBackground)
+                .cornerRadius(5)
+            }
+            .buttonStyle(.plain)
+            .help(columnButtonHelp)
+            .scaleEffect(isHovered["column", default: false] ? 1.1 : 1.0)
+            .animation(.spring(response: 0.2, dampingFraction: 0.5), value: isHovered["column", default: false])
+            .onHover { hovering in isHovered["column"] = hovering }
+
             Divider()
                 .frame(width: 1, height: 16)
                 .background(Color.white.opacity(0.2))
@@ -114,7 +188,13 @@ public struct ToolbarView: View {
                 .background(Color.white.opacity(0.2))
             
             // Exit Button
-            Button(action: onExit) {
+            Button(action: {
+                // Clear column state before dismissing so re-opening the
+                // overlay always starts clean, and any in-progress column
+                // define gesture can't leave orphaned state behind.
+                engine.clearColumnBounds()
+                onExit()
+            }) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 20))
                     .foregroundColor(.white.opacity(0.85))

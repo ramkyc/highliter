@@ -5,6 +5,16 @@ public final class CanvasView: NSView {
     private let engine: DrawingEngine
     private var cancellables = Set<AnyCancellable>()
     public var strokeWidth: CGFloat = 20.0
+
+    // MARK: - Column-definition gesture state
+
+    /// X coordinate (canvas-local) where the column-definition drag began.
+    /// Non-nil only while a column-define gesture is in progress.
+    private var columnDefineAnchorX: CGFloat?
+
+    /// Most recent X coordinate (canvas-local) of the live column-define drag.
+    /// Drives the dashed preview band rendered in `draw(_:)`.
+    private var columnDefineCurrentX: CGFloat?
     
     public init(engine: DrawingEngine) {
         self.engine = engine
@@ -35,6 +45,16 @@ public final class CanvasView: NSView {
     
     public override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+
+        // In column-define mode, intercept the gesture entirely — start
+        // tracking the column drag without creating any drawing stroke.
+        if engine.isColumnDefineMode {
+            columnDefineAnchorX = point.x
+            columnDefineCurrentX = point.x
+            needsDisplay = true
+            return
+        }
+
         let style = StrokeStyle(width: strokeWidth, opacity: 0.35, colorHex: engine.activeColorHex)
         engine.beginStroke(at: point, style: style, scopeBounds: lineBlockScopeBounds(forGestureStartingAt: point))
     }
@@ -69,6 +89,14 @@ public final class CanvasView: NSView {
 
     public override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+
+        // Update the live column-define preview while dragging.
+        if engine.isColumnDefineMode {
+            columnDefineCurrentX = point.x
+            needsDisplay = true
+            return
+        }
+
         if event.modifierFlags.contains(.shift) {
             // Shift+drag highlights every line of text between the start and
             // current point — like a multi-line text selection — instead of
@@ -80,6 +108,21 @@ public final class CanvasView: NSView {
     }
     
     public override func mouseUp(with event: NSEvent) {
+        // Commit or cancel the column-definition gesture.
+        if engine.isColumnDefineMode {
+            if let anchorX = columnDefineAnchorX, let currentX = columnDefineCurrentX,
+               let bounds = ColumnBounds.make(x1: anchorX, x2: currentX) {
+                engine.setColumnBounds(bounds)
+            } else {
+                // Drag was too small (or just a click) — cancel silently.
+                engine.isColumnDefineMode = false
+            }
+            columnDefineAnchorX = nil
+            columnDefineCurrentX = nil
+            needsDisplay = true
+            return
+        }
+
         let completedStroke = engine.activeStroke
         let dragRange = engine.lineBlockRange
         let dragScope = engine.lineBlockScope
@@ -146,6 +189,13 @@ public final class CanvasView: NSView {
         // coordinates) can be clipped against it directly.
         let scopeScreen: CGRect? = scope.map {
             CGRect(x: $0.minX + frame.minX, y: $0.minY + frame.minY, width: $0.width, height: $0.height)
+        }
+
+        // Convert canvas-local column bounds to screen coordinates so they
+        // can be applied directly against Vision's screen-coordinate line
+        // rectangles. Only the x-axis matters here; y is unused.
+        let columnBoundsScreen: ColumnBounds? = engine.columnBounds.map {
+            ColumnBounds(minX: $0.minX + frame.minX, maxX: $0.maxX + frame.minX)
         }
 
         let region = CGRect(
@@ -224,6 +274,20 @@ public final class CanvasView: NSView {
                     guard bandEndX > bandStartX else { continue }
                 }
 
+                // Clamp to the user-defined column bounds when set. This is
+                // the primary fix for highlights bleeding into adjacent
+                // columns in multi-column layouts (e.g. newspaper PDFs):
+                // Vision sometimes reports — or `mergedIntoLines` produces —
+                // line rectangles that span multiple columns at the same row.
+                // Clipping to the column the user explicitly defined keeps
+                // every band inside that column, regardless of how wide the
+                // detected line rectangle is.
+                if let col = columnBoundsScreen {
+                    bandStartX = max(bandStartX, col.minX)
+                    bandEndX = min(bandEndX, col.maxX)
+                    guard bandEndX > bandStartX else { continue }
+                }
+
                 if index == startLineIndex {
                     bandStartX = min(max(startPoint.x, bandStartX), bandEndX)
                 }
@@ -250,6 +314,48 @@ public final class CanvasView: NSView {
         
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         
+        // MARK: Column guide overlay (rendered beneath all highlights)
+        // Wrapped in saveGState/restoreGState so dash patterns and color
+        // settings don't bleed into the stroke-rendering loop that follows.
+
+        context.saveGState()
+        if let anchorX = columnDefineAnchorX, let currentX = columnDefineCurrentX {
+            // Live dashed preview while the user is dragging to define a column.
+            let guideMinX = min(anchorX, currentX)
+            let guideMaxX = max(anchorX, currentX)
+            let fillRect = CGRect(x: guideMinX, y: 0, width: guideMaxX - guideMinX, height: bounds.height)
+            NSColor.systemCyan.withAlphaComponent(0.13).setFill()
+            NSBezierPath(rect: fillRect).fill()
+
+            // Dashed left and right column edges.
+            NSColor.systemCyan.withAlphaComponent(0.80).setStroke()
+            let edgePath = NSBezierPath()
+            edgePath.lineWidth = 1.5
+            let dashPattern: [CGFloat] = [5, 4]
+            edgePath.setLineDash(dashPattern, count: dashPattern.count, phase: 0)
+            edgePath.move(to: CGPoint(x: guideMinX, y: 0))
+            edgePath.line(to: CGPoint(x: guideMinX, y: bounds.height))
+            edgePath.move(to: CGPoint(x: guideMaxX, y: 0))
+            edgePath.line(to: CGPoint(x: guideMaxX, y: bounds.height))
+            edgePath.stroke()
+        } else if let col = engine.columnBounds {
+            // Persistent subtle guide shown after a column has been set.
+            let fillRect = CGRect(x: col.minX, y: 0, width: col.width, height: bounds.height)
+            NSColor.systemCyan.withAlphaComponent(0.08).setFill()
+            NSBezierPath(rect: fillRect).fill()
+
+            // Solid edges — bright enough to be noticed without distracting from highlights.
+            NSColor.systemCyan.withAlphaComponent(0.45).setStroke()
+            let edgePath = NSBezierPath()
+            edgePath.lineWidth = 1.0
+            edgePath.move(to: CGPoint(x: col.minX, y: 0))
+            edgePath.line(to: CGPoint(x: col.minX, y: bounds.height))
+            edgePath.move(to: CGPoint(x: col.maxX, y: 0))
+            edgePath.line(to: CGPoint(x: col.maxX, y: bounds.height))
+            edgePath.stroke()
+        }
+        context.restoreGState()
+
         // Render completed strokes plus active drawing path
         var allStrokes = engine.strokes
         if let active = engine.activeStroke {

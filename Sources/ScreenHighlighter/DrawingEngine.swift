@@ -2,11 +2,30 @@ import Foundation
 import Combine
 import AppKit
 
+/// Canvas-local horizontal extent of a user-defined column.
+/// Stored in the same coordinate space as all other `DrawingEngine` geometry
+/// (canvas-local, origin at bottom-left). `CanvasView` converts to screen
+/// coordinates when needed (e.g., inside `refineLineBlockHighlight`).
+public struct ColumnBounds: Sendable {
+    public let minX: CGFloat
+    public let maxX: CGFloat
+    public var width: CGFloat { maxX - minX }
+
+    /// Returns `nil` if the two x-values are so close together that no
+    /// meaningful column can be defined (protects against accidental clicks).
+    public static func make(x1: CGFloat, x2: CGFloat) -> ColumnBounds? {
+        guard abs(x1 - x2) > 4 else { return nil }
+        return ColumnBounds(minX: min(x1, x2), maxX: max(x1, x2))
+    }
+}
+
 @MainActor
 public protocol DrawingEngineProtocol: AnyObject {
     var strokes: [Stroke] { get }
     var activeStroke: Stroke? { get }
-    
+    var columnBounds: ColumnBounds? { get }
+    var isColumnDefineMode: Bool { get set }
+
     func beginStroke(at point: CGPoint, style: StrokeStyle, scopeBounds: CGRect?)
     func appendPoint(_ point: CGPoint)
     func updateActiveStrokeAsLineBlock(to point: CGPoint, lineHeight: CGFloat)
@@ -14,6 +33,8 @@ public protocol DrawingEngineProtocol: AnyObject {
     func endStroke()
     func undo()
     func clear()
+    func setColumnBounds(_ bounds: ColumnBounds)
+    func clearColumnBounds()
 }
 
 @MainActor
@@ -27,6 +48,19 @@ public final class DrawingEngine: ObservableObject, DrawingEngineProtocol {
     /// toolbar) so highlights remain visible while the user interacts with
     /// other apps underneath. Toggled from the toolbar's mode button.
     @Published public var isDrawModeActive: Bool = true
+
+    /// Canvas-local horizontal bounds of a column the user has explicitly
+    /// defined via the column-mode gesture. When set, every OCR-refined
+    /// multi-line highlight is additionally clamped to these x-extents so
+    /// bands never bleed into adjacent columns (e.g. in a newspaper layout).
+    /// `nil` means no column is defined and highlights are unclamped.
+    @Published public private(set) var columnBounds: ColumnBounds? = nil
+
+    /// When `true`, the next mouse drag in `CanvasView` is interpreted as a
+    /// column-definition gesture (horizontal drag to set `columnBounds`) rather
+    /// than as a drawing or text-highlight gesture. Automatically set back to
+    /// `false` once the column is committed or the gesture is cancelled.
+    @Published public var isColumnDefineMode: Bool = false
 
     /// The stable anchor point of the in-progress Shift+drag block-highlight
     /// gesture, in canvas-local coordinates, captured once when the gesture
@@ -199,5 +233,21 @@ public final class DrawingEngine: ObservableObject, DrawingEngineProtocol {
         lineBlockAnchor = nil
         lineBlockRange = nil
         lineBlockScope = nil
+        // Column bounds are intentionally preserved across clear() — the user
+        // explicitly set a column and likely wants to keep highlighting in it.
+    }
+
+    /// Stores the given column bounds and exits column-define mode. Called by
+    /// `CanvasView` once the user finishes dragging across a column.
+    public func setColumnBounds(_ bounds: ColumnBounds) {
+        columnBounds = bounds
+        isColumnDefineMode = false
+    }
+
+    /// Removes the stored column bounds and exits column-define mode. After
+    /// this call, multi-line highlights revert to window-scoped clamping only.
+    public func clearColumnBounds() {
+        columnBounds = nil
+        isColumnDefineMode = false
     }
 }
