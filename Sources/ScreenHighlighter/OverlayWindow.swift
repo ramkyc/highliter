@@ -31,7 +31,7 @@ public final class OverlayWindow: NSWindow {
     public override var canBecomeKey: Bool {
         return true
     }
-    
+
     public override var canBecomeMain: Bool {
         return false
     }

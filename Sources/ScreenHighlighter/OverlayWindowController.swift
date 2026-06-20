@@ -12,6 +12,13 @@ public final class OverlayWindowController: NSWindowController {
 
     private var modeCancellable: AnyCancellable?
     private var interactivityTimer: Timer?
+    private var scrollMonitor: Any?
+    private var keyMonitor: Any?
+
+    /// Marks a re-posted scroll CGEvent so we can detect if it bounces back
+    /// to our window (e.g. if ignoresMouseEvents was restored before the
+    /// window-server routed the re-post) and drop it instead of looping.
+    private static let scrollForwardedFlag: Int64 = 0x4849474C
 
     public init(screen: NSScreen, engine: DrawingEngine, onDismiss: @escaping () -> Void) {
         self.engine = engine
@@ -60,6 +67,11 @@ public final class OverlayWindowController: NSWindowController {
         contentView.addSubview(container)
         container.addSubview(hostingView)
         self.draggableContainer = container
+
+        // Give the canvas a weak reference to the toolbar container so it can
+        // exclude that region from drawing gestures (belt-and-suspenders guard
+        // against hit-test edge cases passing toolbar clicks to the canvas).
+        canvas.toolbarContainer = container
         
         // 4. Auto Layout Constraints
         NSLayoutConstraint.activate([
@@ -86,10 +98,14 @@ public final class OverlayWindowController: NSWindowController {
         window?.orderFrontRegardless()
         refreshInteractivity()
         startInteractivityMonitoring()
+        startScrollPassthrough()
+        startKeyMonitor()
     }
 
     public func hide() {
         stopInteractivityMonitoring()
+        stopScrollPassthrough()
+        stopKeyMonitor()
         window?.orderOut(nil)
     }
 
@@ -150,31 +166,108 @@ public final class OverlayWindowController: NSWindowController {
         window.ignoresMouseEvents = !frameOnScreen.contains(mouseLocation)
     }
 
+    // MARK: - Scroll Passthrough
+
+    /// Intercepts scroll-wheel events before AppKit dispatches them to the
+    /// canvas and forwards them to the app underneath the overlay.
+    ///
+    /// Why a local monitor instead of overriding NSWindow.sendEvent:
+    /// sendEvent re-posts a CGEvent copy → if the copy bounces back before
+    /// ignoresMouseEvents is restored, sendEvent fires again → infinite loop
+    /// that floods the event queue and freezes the mouse.
+    ///
+    /// Local monitors run before dispatch, so returning nil here swallows
+    /// the event cleanly.  We simultaneously post a flagged copy so the
+    /// underlying app receives the scroll.  The flag lets us detect and drop
+    /// any copy that bounces back (when ignoresMouseEvents was restored first),
+    /// breaking any potential loop.
+    private func startScrollPassthrough() {
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard
+                let self = self,
+                let win = self.window as? OverlayWindow,
+                event.window === win,       // only intercept events aimed at our window
+                !win.ignoresMouseEvents     // only in draw mode (click-through already passes through)
+            else {
+                return event
+            }
+
+            // If this is our own re-posted copy bouncing back (race: ignoresMouseEvents
+            // was already restored before the window server processed the re-post),
+            // drop it silently rather than re-entering the forward loop.
+            if event.cgEvent?.getIntegerValueField(.eventSourceUserData) == Self.scrollForwardedFlag {
+                return nil
+            }
+
+            // Open a brief pass-through window so the re-post is routed to the
+            // window below rather than back to us.
+            win.ignoresMouseEvents = true
+            if let cgCopy = event.cgEvent?.copy() {
+                cgCopy.setIntegerValueField(.eventSourceUserData, value: Self.scrollForwardedFlag)
+                cgCopy.post(tap: .cghidEventTap)
+            }
+            // Restore on the next run-loop iteration.  The 30 Hz interactivity
+            // timer is a belt-and-suspenders backstop that corrects the state
+            // within ≤ 33 ms regardless.
+            DispatchQueue.main.async { [weak win] in
+                win?.ignoresMouseEvents = false
+            }
+
+            return nil  // swallow from our responder chain — canvas never sees it
+        }
+    }
+
+    private func stopScrollPassthrough() {
+        if let monitor = scrollMonitor {
+            NSEvent.removeMonitor(monitor)
+            scrollMonitor = nil
+        }
+    }
+
     // MARK: - Keyboard Controls
-    
-    public override func keyDown(with event: NSEvent) {
-        let keyCode = event.keyCode
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        
-        // ESC key (Escape to Exit)
-        if keyCode == 53 {
-            onDismiss()
-            return
+
+    /// A local key monitor intercepts key events before AppKit dispatches
+    /// them to the responder chain.  This is more reliable than overriding
+    /// keyDown on the window controller because:
+    ///   • Our overlay is at .statusBar level but does not steal keyboard focus
+    ///     from the browser/app the user is reading — key events keep going to
+    ///     that app's key window, so keyDown on our controller never fires.
+    ///   • A local monitor fires for any key event that enters our process,
+    ///     regardless of which window is key.
+    private func startKeyMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return event }
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+            switch event.keyCode {
+            case 53: // Esc
+                self.engine.clearColumnBounds()
+                self.onDismiss()
+                return nil
+            case 51: // Delete / Backspace — clear all strokes
+                self.engine.clear()
+                return nil
+            default:
+                break
+            }
+
+            // Cmd+Z — undo last stroke
+            if flags == .command,
+               let chars = event.charactersIgnoringModifiers,
+               chars.lowercased() == "z" {
+                self.engine.undo()
+                return nil
+            }
+
+            return event
         }
-        
-        // Command + Z (Undo last stroke)
-        if flags == .command, let chars = event.charactersIgnoringModifiers, chars.lowercased() == "z" {
-            engine.undo()
-            return
+    }
+
+    private func stopKeyMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
         }
-        
-        // Backspace / Delete (Clear all strokes)
-        if keyCode == 51 {
-            engine.clear()
-            return
-        }
-        
-        super.keyDown(with: event)
     }
 }
 

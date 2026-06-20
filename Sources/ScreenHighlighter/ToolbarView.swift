@@ -37,6 +37,15 @@ public struct ToolbarView: View {
         }
     }
 
+    /// The SwiftUI Color that matches the currently selected highlight colour.
+    /// Falls back to yellow (the default palette colour) when the hex isn't
+    /// in the palette — keeps behaviour identical to what it was before this fix.
+    private var activeColor: Color {
+        Self.paletteColors
+            .first { $0.0.uppercased() == engine.activeColorHex.uppercased() }?
+            .1 ?? Color.yellow
+    }
+
     // Premium glowing colors mapping hex to SwiftUI Colors
     private static let paletteColors: [(String, Color)] = [
         ("#FFFF00", Color.yellow),
@@ -133,7 +142,7 @@ public struct ToolbarView: View {
             }) {
                 Image(systemName: engine.isDrawModeActive ? "highlighter" : "cursorarrow")
                     .font(.system(size: 18))
-                    .foregroundColor(engine.isDrawModeActive ? Color.yellow : Color.white.opacity(0.85))
+                    .foregroundColor(engine.isDrawModeActive ? activeColor : Color.white.opacity(0.85))
             }
             .buttonStyle(.plain)
             .help(engine.isDrawModeActive
@@ -207,6 +216,11 @@ public struct ToolbarView: View {
                 isHovered["exit"] = hovering
             }
         }
+        // Make the entire toolbar bounding rect hittable, not just the button
+        // icon pixels.  Without this, clicks that land on the VisualEffectView
+        // background between buttons fall through AppKit's hit-test and reach
+        // the canvas below, starting an unwanted highlight stroke.
+        .contentShape(Rectangle())
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(

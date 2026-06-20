@@ -6,6 +6,22 @@ public final class CanvasView: NSView {
     private var cancellables = Set<AnyCancellable>()
     public var strokeWidth: CGFloat = 20.0
 
+    // MARK: - Toolbar exclusion
+
+    /// Set by OverlayWindowController after layout.  Any mouse gesture that
+    /// begins inside this rect is ignored by the canvas so toolbar button
+    /// taps are never mistaken for drawing gestures, even if an edge-case
+    /// hit-test failure causes the event to reach the canvas.
+    weak var toolbarContainer: NSView?
+
+    /// Returns true when `point` (in the canvas's own coordinate space, which
+    /// matches the contentView's space since the canvas fills it edge-to-edge)
+    /// falls within the toolbar container's frame.
+    private func isInToolbar(_ point: CGPoint) -> Bool {
+        guard let container = toolbarContainer else { return false }
+        return container.frame.contains(point)
+    }
+
     // MARK: - Column-definition gesture state
 
     /// X coordinate (canvas-local) where the column-definition drag began.
@@ -45,6 +61,11 @@ public final class CanvasView: NSView {
     
     public override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+
+        // Never start a gesture on the toolbar — belt-and-suspenders guard in
+        // case a hit-test edge case lets the event reach the canvas instead of
+        // the toolbar container above it.
+        if isInToolbar(point) { return }
 
         // In column-define mode, intercept the gesture entirely — start
         // tracking the column drag without creating any drawing stroke.
@@ -89,6 +110,7 @@ public final class CanvasView: NSView {
 
     public override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        if isInToolbar(point) { return }
 
         // Update the live column-define preview while dragging.
         if engine.isColumnDefineMode {
@@ -108,6 +130,9 @@ public final class CanvasView: NSView {
     }
     
     public override func mouseUp(with event: NSEvent) {
+        let upPoint = convert(event.locationInWindow, from: nil)
+        if isInToolbar(upPoint) { return }
+
         // Commit or cancel the column-definition gesture.
         if engine.isColumnDefineMode {
             if let anchorX = columnDefineAnchorX, let currentX = columnDefineCurrentX,
